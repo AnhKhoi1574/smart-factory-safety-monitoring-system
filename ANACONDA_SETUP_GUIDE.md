@@ -1,116 +1,81 @@
-# Anaconda Setup Guide — Smart Factory Safety Monitoring System
+# Anaconda Setup Guide
 
-This guide outlines how to set up the **smart-factory-safety** Anaconda environment to run the Exploratory Data Analysis (EDA) and preprocessing notebooks in this repository.
+This project is designed around an Anaconda workflow for Jupyter-heavy PPE detector development. The environment file installs the general data, visualization, and YOLO tooling on Python 3.14. PyTorch GPU support is installed as a follow-up step so each can choose the right build for their machine.
 
-By using Anaconda, we take advantage of pre-compiled, optimized binaries for performance-critical libraries like `numpy` and `opencv` on Windows, which helps avoid common build issues.
+## 1. Create the Base Environment
 
----
+From the repository root:
 
-## 🛠️ Prerequisites
-Make sure you have either **Anaconda** or **Miniconda** installed on your system.
-* You can verify this by opening your search bar, typing **Anaconda Prompt**, and opening it.
-* Alternatively, run `conda --version` in your terminal.
-
----
-
-## 🚀 Step-by-Step Setup
-
-### Step 1: Open Anaconda Prompt
-Open the **Anaconda Prompt** (or **Miniconda Prompt**) from your Start Menu. This ensures all conda commands are loaded in your shell path.
-
-### Step 2: Navigate to the Repository Root
-Change your directory to where the project is located:
-```cmd
+```powershell
 cd C:\Github\smart-factory-safety-monitoring-system
-```
-
-### Step 3: Create the Conda Environment
-Use the provided `environment.yml` file to create a clean, dedicated environment:
-```cmd
 conda env create -f environment.yml
-```
-> [!NOTE]
-> This command will download and configure Python 3.10 along with the standard ML & Computer Vision dependencies (Pandas, Seaborn, Matplotlib, Pillow, OpenCV, Jupyter, and IPykernel) from the `conda-forge` channel.
-
-### Step 4: Activate the Environment
-Once the environment is created, activate it:
-```cmd
-conda activate smart-factory-safety
+conda activate ppe-yolo
+python -m ipykernel install --user --name=ppe-yolo --display-name "Python (ppe-yolo)"
 ```
 
-### Step 5: Register the Jupyter Kernel (Crucial Step)
-To ensure that Jupyter Notebook or VS Code can locate this specific environment, register it as a Jupyter kernel:
-```cmd
-python -m ipykernel install --user --name=smart-factory-safety --display-name "Python (smart-factory-safety)"
+## 2. Install PyTorch for Your Device
+
+The `environment.yml` intentionally does not pin `torch` so you can install a CPU or CUDA build that matches your workstation.
+
+### Option A: NVIDIA GPU, CUDA 13.2 wheels
+
+Use this if your NVIDIA environment is set up for CUDA 13.2 and you want the matching PyTorch wheel index:
+
+```powershell
+pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu132
 ```
 
----
+### Option B: NVIDIA GPU, CUDA 13.0 wheels
 
-## 🎮 Enabling NVIDIA GPU Acceleration (CUDA)
-By default, the environment installs a CPU-only version of PyTorch. To train your YOLO models at maximum speed on an NVIDIA GPU (e.g. RTX 30, 40, or 50 series), you need to install PyTorch with CUDA support.
+Use this if your NVIDIA environment is standardized on CUDA 13.0-compatible drivers:
 
-### Standard GPUs (RTX 30 / 40 Series — CUDA 12.1 / 12.4)
-Run this command to install PyTorch with CUDA 12.1 support:
-```cmd
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121 --force-reinstall
+```powershell
+pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu130
 ```
 
-### Next-Gen GPUs (RTX 50 Series Blackwell — CUDA 13.2)
-If you are using an NVIDIA RTX 50-series Blackwell GPU (like the RTX 5060 Ti) and want to use the experimental CUDA 13.2 runtime, run the PyTorch nightly build command:
-```cmd
-pip install torch torchvision --index-url https://download.pytorch.org/whl/nightly/cu132 --force-reinstall
+### Option C: NVIDIA GPU, CUDA 12.6 wheels
+
+Use this if your NVIDIA environment is standardized on CUDA 12.6-compatible drivers:
+
+```powershell
+pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu126
 ```
 
-### 🔍 Verification Check
-To verify that PyTorch is successfully recognizing your NVIDIA GPU:
-```cmd
-python -c "import torch; print('CUDA Available:', torch.cuda.is_available()); print('GPU Name:', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'None'); print('Supported Architectures:', torch.cuda.get_arch_list())"
-```
-For RTX 50-series Blackwell cards, make sure `sm_120` appears in the list of supported architectures.
+### Option D: CPU-only fallback
 
----
-
-## 📓 Running the Notebooks
-
-### Option A: Using VS Code (Recommended)
-1. Open the repository root folder in VS Code.
-2. Open the first notebook: `ppe-detection/notebooks/01_eda.ipynb`.
-3. In the top right corner of the notebook editor, click **Select Kernel** -> **Python Environments...**
-4. Choose **Python (smart-factory-safety)** (or the interpreter pointing to the `smart-factory-safety` conda environment).
-5. Run the cells.
-
-### Option B: Using Jupyter Notebook Classic
-1. In your activated Anaconda prompt, run:
-   ```cmd
-   jupyter notebook
-   ```
-2. In the web interface, open `ppe-detection/notebooks/01_eda.ipynb` or `02_preprocessing.ipynb`.
-3. If the kernel is not set automatically, go to the top menu: **Kernel** -> **Change kernel** -> **Python (smart-factory-safety)**.
-
----
-
-## ⚡ Alternative Quick Setup (Command Line)
-If you prefer not to use the `environment.yml` file, you can create the environment manually via CLI:
-
-```cmd
-# Create the environment with Python 3.10
-conda create -y -n smart-factory-safety python=3.10
-
-# Activate the environment
-conda activate smart-factory-safety
-
-# Install the dependencies from requirements.txt
-pip install -r requirements.txt
-
-# Register the Jupyter kernel
-python -m ipykernel install --user --name=smart-factory-safety --display-name "Python (smart-factory-safety)"
+```powershell
+pip install --upgrade torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
 ```
 
----
+These install options are based on the official PyTorch installation guidance:
 
-## 🔍 Validation Check
-To verify that everything is working perfectly, you can run a quick check within your activated environment:
-```cmd
-python -c "import cv2, pandas, PIL, matplotlib, seaborn; print('All libraries loaded successfully!')"
+- https://docs.pytorch.org/get-started/locally/
+- https://docs.pytorch.org/get-started/previous-versions/
+
+## 3. Verify CUDA Availability
+
+```powershell
+python -c "import torch; print('torch', torch.__version__); print('cuda_available', torch.cuda.is_available()); print('device_count', torch.cuda.device_count()); print('device_name', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU only')"
 ```
-This should print `All libraries loaded successfully!` without any errors. You are now fully prepared to run the safety monitoring preprocessing pipeline!
+
+Optional system-level check:
+
+```powershell
+nvidia-smi
+```
+
+## 4. Open the v2 Pipeline
+
+After the environment is ready, work from the notebooks in:
+
+- `ppe-detection/v2_pipeline/notebooks/01_validate_and_merge_dataset.ipynb`
+- through
+- `ppe-detection/v2_pipeline/notebooks/09_inference_tracking_demo.ipynb`
+
+The notebooks import reusable helpers from `ppe-detection/v2_pipeline/src/`.
+
+## 5. Notes for Teammates
+
+- Each teammate should contribute source folders in the form `images/` plus `labels/`.
+- Do not place large datasets, generated YOLO runs, or trained weights under Git-tracked paths outside the ignored artifact folders.
+- The legacy v1 assets remain available under `ppe-detection/v1_legacy/` for reference only.

@@ -1,17 +1,24 @@
-name: smart-factory-safety
+name: ppe-yolo
 channels:
   - conda-forge
   - defaults
+
 dependencies:
-  - python=3.10
-  - jupyter
-  - ipykernel
+  - python=3.14
+  - pip
+  - numpy
   - pandas
   - matplotlib
   - seaborn
-  - pillow
+  - scikit-learn
   - opencv
-  - pip
+  - pillow
+  - pyyaml
+  - tqdm
+  - jupyter
+  - ipykernel
+
   - pip:
-    - albumentations
-    - ultralytics
+      - ultralytics
+      - albumentations
+      - roboflow

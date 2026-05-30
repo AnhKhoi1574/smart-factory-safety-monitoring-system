@@ -1,69 +1,39 @@
-# 🛡️ Smart Factory Safety Monitoring System
+# Smart Factory Safety Monitoring System
 
-[![Python 3.10](https://img.shields.io/badge/python-3.10-blue.svg)](https://www.python.org/)
-[![Conda](https://img.shields.io/badge/conda-enabled-green.svg)](https://conda.io/)
-[![YOLOv8](https://img.shields.io/badge/YOLOv8-Ready-orange.svg)](https://github.com/ultralytics/ultralytics)
+This repository contains the PPE detection workstream for a smart factory safety monitoring system. The detector is built for top-down CCTV views and uses three YOLO classes:
 
-Welcome to the **Smart Factory Safety Monitoring System** repository. This system is designed to monitor factory work areas in real-time, focusing on detecting Personal Protective Equipment (PPE) like helmets and vests to ensure workplace safety.
+- `0`: person
+- `1`: helmet
+- `2`: vest
 
-Currently, this repository houses the **PPE Detection Module**, focusing on initial Exploratory Data Analysis (EDA), dataset cleaning, bounding-box validation, and preprocessing pipelines that prepare raw safety datasets for training state-of-the-art object detection models (YOLOv8).
+The repository is now organized into two tracks:
 
----
+- `ppe-detection/v1_legacy/`: preserved first-pass work, including the original notebooks, reports, YOLO runs, candidate results, and downloaded checkpoint files.
+- `ppe-detection/v2_pipeline/`: the clean, reproducible notebook-first pipeline for dataset intake, validation, merging, splitting, offline augmentation, candidate training, ablations, final evaluation, and inference/tracking demos.
 
-## 📁 Repository Structure
+## Repository Layout
 
-*   `environment.yml` — Central Anaconda environment configuration file.
-*   `requirements.txt` — Standard pip requirements file.
-*   `ANACONDA_SETUP_GUIDE.md` — Complete, detailed step-by-step setup guide for Anaconda.
-*   `ppe-detection/` — The primary PPE preprocessing module:
-    *   `data/` — Dataset directories (raw & processed YOLO format).
-    *   `notebooks/01_eda.ipynb` — Interactive Exploratory Data Analysis.
-    *   `notebooks/02_preprocessing.ipynb` — Pipeline to clean, remap classes, and output YOLOv8 structured folders.
-    *   `reports/preprocessing_report.md` — Comprehensive analysis of dataset distribution, remapping logic, and validation outcomes.
+- `environment.yml`: the main Anaconda environment definition for notebook work.
+- `requirements.txt`: a pip-oriented dependency mirror for teams that prefer pip installs inside a managed environment.
+- `ANACONDA_SETUP_GUIDE.md`: setup instructions, including NVIDIA CUDA-enabled PyTorch installation.
+- `show_structure.py`: lightweight tree printer for repository checks.
+- `ppe-detection/`: PPE-specific module documentation and both v1/v2 work areas.
 
----
+## Recommended Workflow
 
-## 🚀 Quick Environment Setup (Anaconda)
+1. Create the conda environment from `environment.yml` with Python 3.14.
+2. If you train on NVIDIA hardware, install CUDA-enabled PyTorch using the commands in [ANACONDA_SETUP_GUIDE.md](ANACONDA_SETUP_GUIDE.md).
+3. Use the notebooks in `ppe-detection/v2_pipeline/notebooks/` in order.
+4. Keep teammate source drops under `ppe-detection/v2_pipeline/data/raw_sources/` only on your local machine.
 
-We use **Anaconda** to handle complex native dependencies like OpenCV and Pillow easily on Windows. 
+## Data and Artifact Policy
 
-Open your **Anaconda Prompt** and execute these quick commands to set up the environment:
+- Raw datasets, merged datasets, split datasets, augmented datasets, YOLO runs, and model weights are intentionally ignored by Git.
+- `.gitkeep` files are retained so the v2 folder structure stays visible on GitHub.
+- The legacy local dataset now lives under `ppe-detection/v1_legacy/data/` and is treated as a local artifact area rather than part of the new reproducible pipeline.
 
-```cmd
-# 1. Navigate to the project directory
-cd C:\Github\smart-factory-safety-monitoring-system
+## Main Entry Points
 
-# 2. Create the environment from configuration
-conda env create -f environment.yml
-
-# 3. Activate the environment
-conda activate smart-factory-safety
-
-# 4. Register the kernel for Jupyter/VS Code
-python -m ipykernel install --user --name=smart-factory-safety --display-name "Python (smart-factory-safety)"
-```
-
-> [!TIP]
-> For advanced configurations, manual setups, or troubleshooting, please see our dedicated [ANACONDA_SETUP_GUIDE.md](ANACONDA_SETUP_GUIDE.md).
-
----
-
-## 📓 Running the Preprocessing Pipeline
-
-Once the environment is active and the Jupyter kernel is registered, run the notebooks in order:
-
-1.  **Exploratory Data Analysis**: Open `ppe-detection/notebooks/01_eda.ipynb` and run all cells to examine the dataset quality.
-2.  **Dataset Preprocessing**: Open `ppe-detection/notebooks/02_preprocessing.ipynb` and run all cells to clean bounding boxes and compile the final YOLOv8 dataset.
-
-The finalized, structured dataset will be generated automatically at:
-📂 `ppe-detection/data/CHV_yolo/data.yaml`
-
----
-
-## 🎯 Preprocessed Classes for YOLOv8
-The original 6 color-specific helmet classes have been simplified into 3 core detection targets:
-*   `0: person`
-*   `1: helmet`
-*   `2: vest`
-
-*Note: Safety violations (e.g., detecting a person without a helmet) are handled dynamically using spatial intersection logic on the bounding boxes, eliminating the need for complex absence classes during model training.*
+- Module overview: [ppe-detection/README.md](ppe-detection/README.md)
+- Legacy area: [ppe-detection/v1_legacy/README.md](ppe-detection/v1_legacy/README.md)
+- New pipeline: [ppe-detection/v2_pipeline/README.md](ppe-detection/v2_pipeline/README.md)

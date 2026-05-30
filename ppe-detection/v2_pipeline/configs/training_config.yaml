@@ -1,0 +1,21 @@
+epochs: 100
+imgsz: 640
+batch: 16
+device: 0
+workers: 8
+patience: 30
+seed: 42
+
+candidate_models:
+  - yolov8n.pt
+  - yolov9t.pt
+  - yolov10n.pt
+  - yolo11n.pt
+  - yolo12n.pt
+  - yolo26n.pt
+
+selection_priority:
+  - recall
+  - map50
+  - latency
+  - model_size
