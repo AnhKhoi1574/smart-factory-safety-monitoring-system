@@ -21,7 +21,7 @@ This is the clean, reproducible PPE detection pipeline for the next development 
 3. The split is created before any augmentation.
 4. Offline augmentation is applied only to training images.
 5. By default, `data/test_sources/` provides the held-out test set.
-6. With an external test set, split `master_original` into train/val only.
+6. With an external test set, split the merged dataset in `data/master_original` into train/val only.
 7. The final test split stays untouched until final evaluation.
 
 ## Main Areas

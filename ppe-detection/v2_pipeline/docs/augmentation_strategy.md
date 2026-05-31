@@ -7,7 +7,7 @@ The v2 pipeline separates augmentation into two layers:
 
 ## Split-Before-Augmentation Rule
 
-The merged original dataset must be split into train, val, and test before any augmentation happens. This prevents augmented siblings of an image from leaking across evaluation boundaries.
+The merged dataset must be split into train, val, and test before any augmentation happens. This prevents augmented siblings of an image from leaking across evaluation boundaries.
 
 ## Offline Augmentation Targets
 

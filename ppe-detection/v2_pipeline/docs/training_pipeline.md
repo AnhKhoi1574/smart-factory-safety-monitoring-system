@@ -5,7 +5,7 @@ The training workflow is designed to keep experiments comparable and to protect 
 ## Sequence
 
 1. Validate and merge raw teammate inputs.
-2. Run EDA on the merged original dataset.
+2. Run EDA on the merged dataset.
 3. Split into train, val, and test.
 4. Generate offline augmentation from the training split only.
 5. Build ablation dataset variants.

@@ -27,7 +27,7 @@ def merge_valid_samples(
     output_labels_dir: Path,
     prefix: str = "ppe",
 ) -> pd.DataFrame:
-    """Copy valid image-label pairs into the master original dataset.
+    """Copy valid image-label pairs into the merged dataset.
 
     Args:
         validation_df: Report produced by ``validate_dataset``.
