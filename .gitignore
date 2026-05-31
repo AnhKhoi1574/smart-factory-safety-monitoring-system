@@ -21,6 +21,7 @@ conda-meta/
 # Local PPE datasets
 ppe-detection/v1_legacy/data/**
 ppe-detection/**/data/raw_sources/**
+ppe-detection/**/data/test_sources/**
 ppe-detection/**/data/master_original/**
 ppe-detection/**/data/splits_original/**
 ppe-detection/**/data/augmented_train/**

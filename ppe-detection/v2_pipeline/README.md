@@ -18,9 +18,11 @@ This is the clean, reproducible PPE detection pipeline for the next development 
 
 1. Every teammate source folder must contain `images/` and `labels/`.
 2. Every image must have a matching YOLO `.txt` label file.
-3. The train/val/test split is created before any augmentation.
+3. The split is created before any augmentation.
 4. Offline augmentation is applied only to training images.
-5. The final test split stays untouched until final evaluation.
+5. By default, `data/test_sources/` provides the held-out test set.
+6. With an external test set, split `master_original` into train/val only.
+7. The final test split stays untouched until final evaluation.
 
 ## Main Areas
 
