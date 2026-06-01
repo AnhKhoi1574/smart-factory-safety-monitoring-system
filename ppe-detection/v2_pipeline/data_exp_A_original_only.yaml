@@ -1,4 +1,4 @@
-path: data/experiments/exp_D_full_pipeline
+path: data/experiments/exp_A_original_only
 train: train/images
 val: val/images
 test: test/images
