@@ -1,0 +1,24 @@
+name: ppe-yolo
+channels:
+  - conda-forge
+  - defaults
+
+dependencies:
+  - python=3.14
+  - pip
+  - numpy
+  - pandas
+  - matplotlib
+  - seaborn
+  - scikit-learn
+  - opencv
+  - pillow
+  - pyyaml
+  - tqdm
+  - jupyter
+  - ipykernel
+
+  - pip:
+      - ultralytics
+      - albumentations
+      - roboflow

@@ -1,0 +1,21 @@
+offline_augmentation:
+  ir_ratio: 0.25
+  sunlight_ratio: 0.15
+  blur_compression_ratio: 0.10
+
+online_augmentation:
+  hsv_h: 0.015
+  hsv_s: 0.30
+  hsv_v: 0.35
+
+  degrees: 5
+  translate: 0.10
+  scale: 0.50
+  perspective: 0.0003
+
+  fliplr: 0.50
+  flipud: 0.00
+
+  mosaic: 1.0
+  mixup: 0.05
+  close_mosaic: 10

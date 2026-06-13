@@ -1,0 +1,14 @@
+numpy
+pandas
+matplotlib
+seaborn
+scikit-learn
+opencv-python
+Pillow
+PyYAML
+tqdm
+jupyter
+ipykernel
+ultralytics
+albumentations
+roboflow
