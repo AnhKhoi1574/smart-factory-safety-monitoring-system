@@ -33,7 +33,3 @@ split:
   test: 0.10
 
 random_seed: 42
-
-empty_labels:
-  allow_hard_negatives: true
-  require_negative_manifest: false
