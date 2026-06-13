@@ -17,19 +17,19 @@ OFFLINE_AUGMENTATION_SOURCES = ("ir", "sunlight", "blur_compression")
 EXPERIMENTS = {
     "exp_A_original_only": {
         "include_offline_augmented": False,
-        "notes": "original train only; online augmentation off during training",
+        "notes": "original train plus shared open-source train if present; online augmentation off during training",
     },
     "exp_B_online_aug": {
         "include_offline_augmented": False,
-        "notes": "original train only; online augmentation on during training",
+        "notes": "original train plus shared open-source train if present; online augmentation on during training",
     },
     "exp_C_offline_aug": {
         "include_offline_augmented": True,
-        "notes": "original plus offline augmented train; online augmentation off/minimal",
+        "notes": "original plus offline augmented train plus shared open-source train if present; online augmentation off/minimal",
     },
     "exp_D_full_pipeline": {
         "include_offline_augmented": True,
-        "notes": "original plus offline augmented train; online augmentation on",
+        "notes": "original plus offline augmented train plus shared open-source train if present; online augmentation on",
     },
 }
 REPORT_COLUMNS = [
@@ -68,6 +68,7 @@ def build_ablation_datasets(
     experiments_dir: Path,
     class_names: dict[int, str],
     overwrite: bool = False,
+    open_source_train_dir: Path | None = None,
 ) -> pd.DataFrame:
     """Create YOLO folders for the four ablation experiments.
 
@@ -78,6 +79,9 @@ def build_ablation_datasets(
         experiments_dir: Destination root for generated experiment datasets.
         class_names: Mapping from class ID to class name.
         overwrite: If ``True``, clear existing experiment files first.
+        open_source_train_dir: Optional train-only public-data root with
+            ``images`` and ``labels`` folders. These samples are copied only
+            into experiment train splits.
 
     Returns:
         A row-level copy report for all copied, skipped, or warning records.
@@ -90,6 +94,7 @@ def build_ablation_datasets(
     """
     splits_original_dir = Path(splits_original_dir)
     augmented_train_dir = Path(augmented_train_dir)
+    open_source_train_dir = Path(open_source_train_dir) if open_source_train_dir else None
     experiments_dir = Path(experiments_dir)
     normalized_class_names = _normalize_class_names(class_names)
 
@@ -98,6 +103,7 @@ def build_ablation_datasets(
 
     report_rows: list[dict[str, str]] = []
     offline_pairs = _collect_offline_augmented_pairs(augmented_train_dir)
+    open_source_pairs = _collect_open_source_train_pairs(open_source_train_dir)
     if not offline_pairs:
         for experiment in ("exp_C_offline_aug", "exp_D_full_pipeline"):
             report_rows.append(
@@ -111,6 +117,22 @@ def build_ablation_datasets(
                     notes=(
                         "offline augmented data missing; experiment contains "
                         "original train samples only"
+                    ),
+                )
+            )
+    if open_source_train_dir is not None and not open_source_pairs:
+        for experiment in EXPERIMENTS:
+            report_rows.append(
+                _report_row(
+                    experiment=experiment,
+                    split="train",
+                    source_type="open_source_train",
+                    original_path="",
+                    copied_path="",
+                    status="warning",
+                    notes=(
+                        "open-source train folder missing, empty, or mismatched; "
+                        "experiment contains no open-source samples"
                     ),
                 )
             )
@@ -135,6 +157,15 @@ def build_ablation_datasets(
             report_rows.extend(
                 copy_augmented_training_data(
                     augmented_pairs=offline_pairs,
+                    destination_train_dir=experiment_dir / "train",
+                    experiment=experiment,
+                )
+            )
+
+        if open_source_pairs:
+            report_rows.extend(
+                copy_open_source_training_data(
+                    open_source_pairs=open_source_pairs,
                     destination_train_dir=experiment_dir / "train",
                     experiment=experiment,
                 )
@@ -246,6 +277,57 @@ def copy_augmented_training_data(
                     experiment=experiment,
                     split="train",
                     source_type="offline_augmented",
+                    original_path=str(label_path),
+                    copied_path=str(copied_label_path),
+                    status="copied",
+                    notes=notes,
+                ),
+            ]
+        )
+    return rows
+
+
+def copy_open_source_training_data(
+    open_source_pairs: list[tuple[Path, Path]],
+    destination_train_dir: Path,
+    experiment: str,
+) -> list[dict[str, str]]:
+    """Copy validated open-source pairs into an experiment train split."""
+    destination_images_dir = Path(destination_train_dir) / "images"
+    destination_labels_dir = Path(destination_train_dir) / "labels"
+    destination_images_dir.mkdir(parents=True, exist_ok=True)
+    destination_labels_dir.mkdir(parents=True, exist_ok=True)
+
+    rows: list[dict[str, str]] = []
+    for image_path, label_path in open_source_pairs:
+        copied_image_path = destination_images_dir / image_path.name
+        copied_label_path = destination_labels_dir / label_path.name
+        notes = ""
+        if copied_image_path.exists() or copied_label_path.exists():
+            copied_image_path, copied_label_path = _safe_conflict_paths(
+                destination_images_dir=destination_images_dir,
+                destination_labels_dir=destination_labels_dir,
+                image_name=image_path.name,
+            )
+            notes = "filename_conflict resolved with safe suffix"
+
+        shutil.copy2(image_path, copied_image_path)
+        shutil.copy2(label_path, copied_label_path)
+        rows.extend(
+            [
+                _report_row(
+                    experiment=experiment,
+                    split="train",
+                    source_type="open_source_train",
+                    original_path=str(image_path),
+                    copied_path=str(copied_image_path),
+                    status="copied",
+                    notes=notes,
+                ),
+                _report_row(
+                    experiment=experiment,
+                    split="train",
+                    source_type="open_source_train",
                     original_path=str(label_path),
                     copied_path=str(copied_label_path),
                     status="copied",
@@ -496,6 +578,18 @@ def _collect_offline_augmented_pairs(
             continue
         pairs.extend(_find_yolo_pairs(images_dir, labels_dir))
     return sorted(pairs, key=lambda item: (item[0].parent.parent.name, item[0].name))
+
+
+def _collect_open_source_train_pairs(
+    open_source_train_dir: Path | None,
+) -> list[tuple[Path, Path]]:
+    if open_source_train_dir is None:
+        return []
+    images_dir = Path(open_source_train_dir) / "images"
+    labels_dir = Path(open_source_train_dir) / "labels"
+    if not images_dir.exists() or not labels_dir.exists():
+        return []
+    return _find_yolo_pairs(images_dir, labels_dir)
 
 
 def _find_yolo_pairs(images_dir: Path, labels_dir: Path) -> list[tuple[Path, Path]]:

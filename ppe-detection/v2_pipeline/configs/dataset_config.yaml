@@ -1,5 +1,7 @@
 raw_sources_dir: data/raw_sources
 test_sources_dir: data/test_sources
+open_source_dir: data/open_source
+open_source_train_dir: data/open_source_train
 master_original_dir: data/master_original
 splits_original_dir: data/splits_original
 augmented_train_dir: data/augmented_train

@@ -19,18 +19,22 @@ Notebook 05 creates four YOLO-ready dataset folders under `data/experiments/`
 so later training and ablation notebooks can compare one factor at a time:
 
 - `exp_A_original_only`: original train split only; online augmentation is off
-  during training.
+  during training. Optional open-source samples are included in train only.
 - `exp_B_online_aug`: original train split only; online augmentation is on
-  during training.
+  during training. Optional open-source samples are included in train only.
 - `exp_C_offline_aug`: original train split plus offline augmented train
-  samples; online augmentation is off or minimal during training.
+  samples; online augmentation is off or minimal during training. Optional
+  open-source samples are included in train only.
 - `exp_D_full_pipeline`: original train split plus offline augmented train
-  samples; online augmentation is on during training.
+  samples; online augmentation is on during training. Optional open-source
+  samples are included in train only.
 
 The validation and test splits are copied identically into every experiment.
-Only the training split changes. This keeps validation metrics comparable during
-Notebook 07 and preserves the final test set for one-time evaluation of the
-selected configuration.
+Only the training split changes. If `data/open_source_train/` exists, those
+validated open-source samples are copied equally into every experiment train
+split and never into validation or test. This keeps validation metrics
+comparable during Notebook 07 and preserves the final test set for one-time
+evaluation of the selected configuration.
 
 Notebook 05 also writes one Ultralytics dataset YAML file per experiment:
 

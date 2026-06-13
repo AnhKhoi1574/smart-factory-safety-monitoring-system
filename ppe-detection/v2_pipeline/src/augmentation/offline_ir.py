@@ -40,32 +40,34 @@ def generate_ir_augmentation(
 
 
 def _transform_ir(image: Image.Image, rng: random.Random) -> Image.Image:
-    """Simulate mild grayscale CCTV/IR appearance without moving objects."""
+    """Simulate light grayscale CCTV/IR appearance without moving objects."""
+    original_array = np.asarray(image.convert("RGB"), dtype=np.float32)
     grayscale = image.convert("L")
     grayscale = _apply_clahe_if_available(grayscale)
 
-    contrast_factor = rng.uniform(1.12, 1.35)
-    brightness_factor = rng.uniform(0.82, 1.02)
+    contrast_factor = rng.uniform(1.04, 1.16)
+    brightness_factor = rng.uniform(0.92, 1.04)
     grayscale = ImageEnhance.Contrast(grayscale).enhance(contrast_factor)
     grayscale = ImageEnhance.Brightness(grayscale).enhance(brightness_factor)
 
     gray_array = np.asarray(grayscale, dtype=np.float32)
     noise = np.random.default_rng(rng.randrange(0, 2**32)).normal(
         loc=0.0,
-        scale=rng.uniform(3.0, 7.0),
+        scale=rng.uniform(1.0, 3.0),
         size=gray_array.shape,
     )
     gray_array = np.clip(gray_array + noise, 0, 255)
 
-    # Keep a faint cool/green cast common in low-light CCTV feeds.
-    rgb = np.stack(
+    # Keep a subtle cool/green cast while preserving some original color cues.
+    ir_tint = np.stack(
         [
-            gray_array * 0.82,
-            gray_array * 0.96,
-            gray_array * 0.88,
+            gray_array * 0.90,
+            gray_array * 0.98,
+            gray_array * 0.94,
         ],
         axis=-1,
     )
+    rgb = (ir_tint * 0.72) + (original_array * 0.28)
     return uint8_array_to_image(rgb)
 
 
@@ -76,6 +78,6 @@ def _apply_clahe_if_available(grayscale: Image.Image) -> Image.Image:
         return grayscale
 
     gray_array = np.asarray(grayscale, dtype=np.uint8)
-    clahe = cv2.createCLAHE(clipLimit=1.6, tileGridSize=(8, 8))
+    clahe = cv2.createCLAHE(clipLimit=1.15, tileGridSize=(8, 8))
     enhanced = clahe.apply(gray_array)
     return Image.fromarray(enhanced, mode="L")

@@ -22,10 +22,18 @@ conda-meta/
 ppe-detection/v1_legacy/data/**
 ppe-detection/**/data/raw_sources/**
 ppe-detection/**/data/test_sources/**
+ppe-detection/**/data/open_source/**
+ppe-detection/**/data/open_source_train/**
 ppe-detection/**/data/master_original/**
 ppe-detection/**/data/splits_original/**
 ppe-detection/**/data/augmented_train/**
 ppe-detection/**/data/experiments/**
+
+# Keep open-source lane placeholders visible while ignoring pasted data
+!ppe-detection/**/data/open_source/
+!ppe-detection/**/data/open_source_train/
+!ppe-detection/**/data/open_source_train/images/
+!ppe-detection/**/data/open_source_train/labels/
 
 # Keep folder placeholders
 !**/.gitkeep
