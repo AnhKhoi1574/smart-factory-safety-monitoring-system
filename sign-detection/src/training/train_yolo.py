@@ -247,6 +247,104 @@ def train_ablation_experiments(
     return pd.DataFrame(rows)
 
 
+def train_final_model(
+    selected_model: str,
+    data_yaml: Path,
+    output_dir: Path,
+    run_name: str,
+    train_args: dict,
+    overwrite: bool = False,
+) -> dict[str, Any]:
+    """Train the final YOLO model after architecture and experiment are locked.
+
+    Notebook 07 intentionally uses ``exp_D_full_pipeline`` for practical
+    robustness, even if the validation ablation ranking put another experiment
+    first. This helper trains one model only and records all important choices
+    so the final selection override is visible in reports.
+
+    Args:
+        selected_model: Fixed YOLO checkpoint selected from prior notebooks.
+        data_yaml: Final dataset YAML, expected to be ``data_exp_D_full_pipeline.yaml``.
+        output_dir: Parent directory for final model runs.
+        run_name: Human-readable final run name.
+        train_args: Ultralytics training arguments plus notebook-only metadata.
+        overwrite: Replace an existing run only when explicitly enabled.
+
+    Returns:
+        A summary dictionary with training status and weight paths.
+    """
+    data_yaml = Path(data_yaml)
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    if not selected_model:
+        raise ValueError("selected_model is required for final training.")
+    if not data_yaml.exists():
+        raise FileNotFoundError(f"Dataset YAML not found: {data_yaml}")
+
+    selected_experiment = str(train_args.get("selected_experiment", "exp_D_full_pipeline"))
+    base_run_name = run_name or _final_run_name(selected_model, selected_experiment)
+    safe_run_name = base_run_name if overwrite else _unique_run_name(output_dir, base_run_name)
+    run_dir = output_dir / safe_run_name
+    resolved_data_yaml = _resolve_dataset_yaml_for_ultralytics(data_yaml, output_dir)
+
+    result: dict[str, Any] = {
+        "selected_model": selected_model,
+        "selected_experiment": selected_experiment,
+        "dataset_yaml": str(data_yaml),
+        "resolved_data_yaml": str(resolved_data_yaml),
+        "run_name": safe_run_name,
+        "run_dir": str(run_dir),
+        "best_weights_path": "",
+        "last_weights_path": "",
+        "training_status": "not_started",
+        "notes": "",
+        "error_message": "",
+    }
+
+    try:
+        if bool(train_args.get("dry_run", False)):
+            run_dir.mkdir(parents=True, exist_ok=True)
+            result.update(
+                {
+                    "training_status": "dry_run",
+                    "notes": "training skipped because dry_run=True",
+                }
+            )
+            return result
+
+        effective_args = dict(train_args)
+        effective_args["overwrite"] = overwrite
+        train_result = _train_one_candidate(
+            weights=selected_model,
+            data_yaml=resolved_data_yaml,
+            output_dir=output_dir,
+            run_name=safe_run_name,
+            train_args=effective_args,
+        )
+        actual_run_dir = _resolve_run_dir(train_result, fallback=run_dir)
+        metrics = extract_training_metrics(actual_run_dir)
+        result.update(
+            {
+                "training_status": "trained",
+                "run_dir": str(actual_run_dir),
+                "best_weights_path": metrics.get("best_weights_path", ""),
+                "last_weights_path": metrics.get("last_weights_path", ""),
+                "notes": "final training completed",
+                **metrics,
+            }
+        )
+    except Exception as exc:
+        result.update(
+            {
+                "training_status": "failed",
+                "error_message": str(exc),
+                "notes": "final training failed",
+            }
+        )
+    return result
+
+
 def _train_one_candidate(
     weights: str,
     data_yaml: Path,
@@ -257,7 +355,13 @@ def _train_one_candidate(
     """Run one Ultralytics training call with notebook-only keys removed."""
     from ultralytics import YOLO
 
-    custom_keys = {"dry_run", "overwrite"}
+    custom_keys = {
+        "dry_run",
+        "overwrite",
+        "selected_experiment",
+        "manual_final_selection_override",
+        "override_reason",
+    }
     yolo_args = {key: value for key, value in train_args.items() if key not in custom_keys and value is not None}
     yolo_args.update(
         {
@@ -333,6 +437,12 @@ def _ablation_run_name(experiment: str, selected_model: str) -> str:
     prefix = ABLATION_RUN_PREFIXES.get(experiment, experiment or "ablation")
     model_stem = Path(selected_model).stem.replace(".", "_")
     return f"{prefix}_{model_stem}"
+
+
+def _final_run_name(selected_model: str, selected_experiment: str) -> str:
+    model_stem = Path(selected_model).stem.replace(".", "_")
+    experiment_label = selected_experiment.replace("exp_", "exp_").replace(" ", "_")
+    return f"final_{model_stem}_{experiment_label}"
 
 
 def _build_ablation_train_args(

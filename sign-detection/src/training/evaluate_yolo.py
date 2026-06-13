@@ -112,6 +112,124 @@ def evaluate_candidate_model(
         }
 
 
+def evaluate_final_model(
+    weights_path: Path,
+    data_yaml: Path,
+    imgsz: int,
+    device: str | int,
+    split: str = "test",
+    output_dir: Path | None = None,
+    plots: bool = True,
+) -> dict:
+    """Evaluate the locked final model on the untouched test split.
+
+    This helper is intended for Notebook 07 only. It runs Ultralytics validation
+    on ``split='test'`` by default and records unavailable metrics as ``None``
+    because Ultralytics result attributes vary by version.
+    """
+    weights_path = Path(weights_path)
+    data_yaml = Path(data_yaml)
+    result: dict[str, Any] = {
+        "status": "not_run",
+        "split": split,
+        "weights_path": str(weights_path),
+        "data_yaml": str(data_yaml),
+        "precision": None,
+        "recall": None,
+        "map50": None,
+        "map50_95": None,
+        "fitness": None,
+        "validation_save_dir": "",
+        "class_metrics": [],
+        "error_message": "",
+    }
+
+    if not weights_path.exists():
+        result.update({"status": "failed", "error_message": f"Weights not found: {weights_path}"})
+        return result
+    if not data_yaml.exists():
+        result.update({"status": "failed", "error_message": f"Dataset YAML not found: {data_yaml}"})
+        return result
+
+    try:
+        from ultralytics import YOLO
+
+        output_dir = Path(output_dir) if output_dir is not None else weights_path.parent
+        resolved_data_yaml = _resolve_dataset_yaml_for_ultralytics(data_yaml, output_dir)
+        model = YOLO(str(weights_path))
+        val_kwargs: dict[str, Any] = {
+            "data": str(resolved_data_yaml),
+            "imgsz": imgsz,
+            "device": device,
+            "split": split,
+            "plots": plots,
+            "verbose": False,
+        }
+        if output_dir is not None:
+            val_kwargs.update({"project": str(output_dir.parent), "name": output_dir.name, "exist_ok": True})
+
+        # The test split is used here for final reporting only, never for tuning.
+        metrics = model.val(**val_kwargs)
+        result.update(_metrics_from_ultralytics_result(metrics))
+        result["validation_save_dir"] = str(getattr(metrics, "save_dir", ""))
+        result["class_metrics"] = _class_metrics_from_ultralytics_result(metrics)
+        result["status"] = "evaluated"
+    except Exception as exc:
+        result.update({"status": "failed", "error_message": str(exc)})
+    return result
+
+
+def save_final_predictions(
+    weights_path: Path,
+    source_dir: Path,
+    output_dir: Path,
+    imgsz: int,
+    device: str | int,
+    conf: float = 0.25,
+) -> dict:
+    """Save optional final-test prediction images for qualitative review."""
+    weights_path = Path(weights_path)
+    source_dir = Path(source_dir)
+    output_dir = Path(output_dir)
+    result: dict[str, Any] = {
+        "status": "not_run",
+        "weights_path": str(weights_path),
+        "source_dir": str(source_dir),
+        "output_dir": str(output_dir),
+        "num_source_images": 0,
+        "error_message": "",
+    }
+
+    if not weights_path.exists():
+        result.update({"status": "failed", "error_message": f"Weights not found: {weights_path}"})
+        return result
+    image_paths = _collect_sample_images(source_dir, max_images=10_000)
+    if not image_paths:
+        result.update({"status": "failed", "error_message": f"No source images found in {source_dir}"})
+        return result
+
+    try:
+        from ultralytics import YOLO
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+        model = YOLO(str(weights_path))
+        model.predict(
+            source=str(source_dir),
+            imgsz=imgsz,
+            device=device,
+            conf=conf,
+            save=True,
+            project=str(output_dir.parent),
+            name=output_dir.name,
+            exist_ok=True,
+            verbose=False,
+        )
+        result.update({"status": "saved", "num_source_images": len(image_paths)})
+    except Exception as exc:
+        result.update({"status": "failed", "error_message": str(exc)})
+    return result
+
+
 def benchmark_model_latency(
     weights_path: Path,
     sample_images_dir: Path,
@@ -203,6 +321,64 @@ def rank_ablation_results(results_df: pd.DataFrame) -> pd.DataFrame:
     ).reset_index(drop=True)
     ranked.insert(0, "rank", range(1, len(ranked) + 1))
     return ranked
+
+
+def _class_metrics_from_ultralytics_result(metrics: Any) -> list[dict[str, Any]]:
+    names = getattr(metrics, "names", {}) or {}
+    box = getattr(metrics, "box", None)
+    if box is None:
+        return []
+
+    rows: list[dict[str, Any]] = []
+    for class_id, class_name in sorted(names.items()):
+        row: dict[str, Any] = {
+            "class_id": class_id,
+            "class_name": class_name,
+            "precision": None,
+            "recall": None,
+            "map50": None,
+            "map50_95": None,
+        }
+        try:
+            class_result = box.class_result(int(class_id))
+            if len(class_result) >= 4:
+                row.update(
+                    {
+                        "precision": _safe_float(class_result[0]),
+                        "recall": _safe_float(class_result[1]),
+                        "map50": _safe_float(class_result[2]),
+                        "map50_95": _safe_float(class_result[3]),
+                    }
+                )
+        except Exception:
+            row.update(
+                {
+                    "precision": _sequence_value(getattr(box, "p", None), int(class_id)),
+                    "recall": _sequence_value(getattr(box, "r", None), int(class_id)),
+                    "map50": _sequence_value(getattr(box, "ap50", None), int(class_id)),
+                    "map50_95": _sequence_value(getattr(box, "maps", None), int(class_id)),
+                }
+            )
+        rows.append(row)
+    return rows
+
+
+def _sequence_value(values: Any, index: int) -> float | None:
+    try:
+        return _safe_float(values[index])
+    except Exception:
+        return None
+
+
+def _collect_sample_images(sample_images_dir: Path, max_images: int) -> list[Path]:
+    image_extensions = {".jpg", ".jpeg", ".png"}
+    if not Path(sample_images_dir).exists():
+        return []
+    return [
+        path
+        for path in sorted(Path(sample_images_dir).iterdir())
+        if path.is_file() and path.suffix.lower() in image_extensions
+    ][:max_images]
 
 
 def _resolve_dataset_yaml_for_ultralytics(data_yaml: Path, output_dir: Path) -> Path:

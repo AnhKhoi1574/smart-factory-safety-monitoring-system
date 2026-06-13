@@ -35,4 +35,24 @@ ablation experiment for final training and final test evaluation.
 
 ## Final Evaluation
 
+Notebook 07 performs final training and final test evaluation. It resolves the
+selected architecture from Notebook 06 ablation results first, then falls back
+to Notebook 05 candidate ranking or `configs/training_config.yaml`.
+
+For final deployment, Notebook 07 intentionally selects
+`exp_D_full_pipeline` even if another ablation experiment ranks higher on
+validation metrics. This manual override is recorded in
+`reports/training/final_training_summary.csv` because the full pipeline is
+expected to be more robust in real factory CCTV conditions: it combines
+offline CCTV-style augmentation with online training augmentation.
+
+Notebook 07 is the first stage allowed to evaluate on the untouched test set.
+The test metrics are for final reporting only and must not be used to revise
+architecture, augmentation choices, confidence thresholds, or backend logic.
+
 ## Export
+
+Final deployment exports are saved under `weights/final/`. ONNX is the default
+export format. Export failures are recorded in
+`reports/training/final_export_report.csv` and should not invalidate the final
+test report.
