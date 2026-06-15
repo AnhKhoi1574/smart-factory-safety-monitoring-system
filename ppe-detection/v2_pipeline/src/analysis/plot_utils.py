@@ -13,6 +13,7 @@ CLASS_COLORS = {
     "person": "#9BB8D3",
     "helmet": "#DF82A8",
     "vest": "#D4C2A5",
+    "cleaning_coverall": "#88B99A",
 }
 
 
