@@ -1,4 +1,10 @@
-"""Build experiment-ready dataset variants for ablation studies."""
+"""Build YOLO ablation datasets for the PPE v2 pipeline.
+
+Notebook 05 uses this module after Notebook 03 has created source-aware
+train/val/test splits and Notebook 04 has generated train-only offline
+augmentation. The builder only copies files into experiment folders; it never
+modifies the original split or augmented data.
+"""
 
 from __future__ import annotations
 
@@ -13,31 +19,33 @@ import yaml
 
 VALID_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 SPLITS = ("train", "val", "test")
-OFFLINE_AUGMENTATION_SOURCES = ("ir", "sunlight", "blur_compression")
-EXPERIMENTS = {
+EXPERIMENTS: dict[str, dict[str, Any]] = {
     "exp_A_original_only": {
         "include_offline_augmented": False,
-        "notes": "original train plus shared open-source train if present; online augmentation off during training",
+        "notes": "train uses original split only; online augmentation off later",
     },
     "exp_B_online_aug": {
         "include_offline_augmented": False,
-        "notes": "original train plus shared open-source train if present; online augmentation on during training",
+        "notes": "train uses original split only; online augmentation on later",
     },
     "exp_C_offline_aug": {
         "include_offline_augmented": True,
-        "notes": "original plus offline augmented train plus shared open-source train if present; online augmentation off/minimal",
+        "notes": "train uses original plus offline augmented samples; online augmentation off/minimal later",
     },
     "exp_D_full_pipeline": {
         "include_offline_augmented": True,
-        "notes": "original plus offline augmented train plus shared open-source train if present; online augmentation on",
+        "notes": "train uses original plus offline augmented samples; online augmentation on later",
     },
 }
-REPORT_COLUMNS = [
+
+COPY_REPORT_COLUMNS = [
     "experiment",
     "split",
     "source_type",
-    "original_path",
-    "copied_path",
+    "original_image_path",
+    "original_label_path",
+    "copied_image_path",
+    "copied_label_path",
     "status",
     "notes",
 ]
@@ -46,212 +54,160 @@ SUMMARY_COLUMNS = [
     "split",
     "num_images",
     "num_labels",
+    "num_no_object_images",
     "num_objects",
     "num_person",
     "num_helmet",
     "num_vest",
+    "num_cleaning_coverall",
     "notes",
-]
-CLASS_DISTRIBUTION_COLUMNS = [
-    "experiment",
-    "split",
-    "class_id",
-    "class_name",
-    "object_count",
 ]
 WARNING_COLUMNS = ["experiment", "split", "warning_type", "details"]
 
 
 def build_ablation_datasets(
-    splits_original_dir: Path,
-    augmented_train_dir: Path,
+    splits_dir: Path,
+    augmented_dir: Path,
     experiments_dir: Path,
     class_names: dict[int, str],
+    output_yaml_dir: Path | None = None,
     overwrite: bool = False,
-    open_source_train_dir: Path | None = None,
-) -> pd.DataFrame:
-    """Create YOLO folders for the four ablation experiments.
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Create the four ablation dataset folders and dataset YAML files.
 
     Args:
-        splits_original_dir: Existing original ``train``, ``val``, and ``test``
-            split folders produced by Notebook 03.
-        augmented_train_dir: Offline augmentation root produced by Notebook 04.
+        splits_dir: Root produced by Notebook 03, containing
+            ``train/``, ``val/``, and ``test/`` YOLO splits.
+        augmented_dir: Flat train-only augmentation root produced by Notebook
+            04, containing ``images/`` and ``labels/``.
         experiments_dir: Destination root for generated experiment datasets.
-        class_names: Mapping from class ID to class name.
-        overwrite: If ``True``, clear existing experiment files first.
-        open_source_train_dir: Optional train-only public-data root with
-            ``images`` and ``labels`` folders. These samples are copied only
-            into experiment train splits.
+        class_names: Class ID to class name mapping. The PPE pipeline currently
+            uses four classes, including ``3 = cleaning_coverall``.
+        output_yaml_dir: Folder where ``data_exp_*.yaml`` files are written.
+            Defaults to the inferred ``v2_pipeline`` root.
+        overwrite: If ``True``, remove files inside existing experiment folders
+            before copying. If ``False``, fail safely when outputs already
+            contain files.
 
     Returns:
-        A row-level copy report for all copied, skipped, or warning records.
+        ``(copy_report, summary, warnings)`` DataFrames.
 
     Raises:
-        FileNotFoundError: If required original split folders are missing.
-        ValueError: If required original splits are empty or mismatched.
-        FileExistsError: If destination folders already contain files and
+        FileNotFoundError: If any required split folder is missing.
+        ValueError: If a required original split has no valid image-label pairs.
+        FileExistsError: If experiment folders already contain files and
             ``overwrite`` is ``False``.
     """
-    splits_original_dir = Path(splits_original_dir)
-    augmented_train_dir = Path(augmented_train_dir)
-    open_source_train_dir = Path(open_source_train_dir) if open_source_train_dir else None
+    splits_dir = Path(splits_dir)
+    augmented_dir = Path(augmented_dir)
     experiments_dir = Path(experiments_dir)
+    v2_root = _infer_v2_root(experiments_dir)
+    output_yaml_dir = Path(output_yaml_dir) if output_yaml_dir else v2_root
     normalized_class_names = _normalize_class_names(class_names)
 
-    _validate_original_splits(splits_original_dir)
+    _validate_original_splits(splits_dir)
     _prepare_experiments_dir(experiments_dir, overwrite=overwrite)
 
     report_rows: list[dict[str, str]] = []
-    offline_pairs = _collect_offline_augmented_pairs(augmented_train_dir)
-    open_source_pairs = _collect_open_source_train_pairs(open_source_train_dir)
+    offline_pairs = collect_yolo_pairs(augmented_dir / "images", augmented_dir / "labels")
+
     if not offline_pairs:
+        # C and D are still built from original train data, but the warning
+        # makes it clear that the offline-augmentation factor is absent.
         for experiment in ("exp_C_offline_aug", "exp_D_full_pipeline"):
             report_rows.append(
-                _report_row(
+                _copy_report_row(
                     experiment=experiment,
                     split="train",
                     source_type="offline_augmented",
-                    original_path="",
-                    copied_path="",
                     status="warning",
-                    notes=(
-                        "offline augmented data missing; experiment contains "
-                        "original train samples only"
-                    ),
-                )
-            )
-    if open_source_train_dir is not None and not open_source_pairs:
-        for experiment in EXPERIMENTS:
-            report_rows.append(
-                _report_row(
-                    experiment=experiment,
-                    split="train",
-                    source_type="open_source_train",
-                    original_path="",
-                    copied_path="",
-                    status="warning",
-                    notes=(
-                        "open-source train folder missing, empty, or mismatched; "
-                        "experiment contains no open-source samples"
-                    ),
+                    notes="no offline augmented pairs found; train contains original split only",
                 )
             )
 
     for experiment, settings in EXPERIMENTS.items():
         experiment_dir = experiments_dir / experiment
         for split in SPLITS:
-            _ensure_yolo_split_dirs(experiment_dir, split)
+            _ensure_yolo_split_dirs(experiment_dir / split)
 
         for split in SPLITS:
             report_rows.extend(
-                copy_yolo_split(
-                    source_split_dir=splits_original_dir / split,
+                copy_yolo_pairs(
+                    pairs=collect_yolo_pairs(
+                        splits_dir / split / "images",
+                        splits_dir / split / "labels",
+                    ),
                     destination_split_dir=experiment_dir / split,
                     experiment=experiment,
                     split=split,
-                    source_type="original",
+                    source_type=f"original_{split}",
                 )
             )
 
         if settings["include_offline_augmented"] and offline_pairs:
             report_rows.extend(
-                copy_augmented_training_data(
-                    augmented_pairs=offline_pairs,
-                    destination_train_dir=experiment_dir / "train",
+                copy_yolo_pairs(
+                    pairs=offline_pairs,
+                    destination_split_dir=experiment_dir / "train",
                     experiment=experiment,
+                    split="train",
+                    source_type="offline_augmented",
                 )
             )
 
-        if open_source_pairs:
-            report_rows.extend(
-                copy_open_source_training_data(
-                    open_source_pairs=open_source_pairs,
-                    destination_train_dir=experiment_dir / "train",
-                    experiment=experiment,
-                )
-            )
-
-        write_dataset_yaml(
-            v2_root=_infer_v2_root(experiments_dir),
+        write_yolo_dataset_yaml(
+            yaml_dir=output_yaml_dir,
             experiment_name=experiment,
+            experiments_dir=experiments_dir,
             class_names=normalized_class_names,
         )
 
-    return pd.DataFrame(report_rows, columns=REPORT_COLUMNS)
+    copy_report = pd.DataFrame(report_rows, columns=COPY_REPORT_COLUMNS)
+    summary = summarize_experiments(experiments_dir, normalized_class_names)
+    warnings = verify_experiment_integrity(
+        experiments_dir=experiments_dir,
+        class_names=normalized_class_names,
+        copy_report=copy_report,
+    )
+    return copy_report, summary, warnings
 
 
-def build_experiment_sets(base_dir: Path, experiments_dir: Path) -> dict[str, Path]:
-    """Backward-compatible wrapper returning expected experiment paths."""
-    base_dir = Path(base_dir)
-    experiments_dir = Path(experiments_dir)
-    return {
-        experiment: experiments_dir / experiment
-        for experiment in EXPERIMENTS
-    }
+def collect_yolo_pairs(images_dir: Path, labels_dir: Path) -> list[tuple[Path, Path]]:
+    """Return sorted image-label pairs with matching stems."""
+    image_paths = _collect_image_paths(images_dir)
+    label_by_stem = {path.stem: path for path in _collect_label_paths(labels_dir)}
+    pairs = [
+        (image_path, label_by_stem[image_path.stem])
+        for image_path in image_paths
+        if image_path.stem in label_by_stem
+    ]
+    return sorted(pairs, key=lambda pair: pair[0].name)
 
 
-def copy_yolo_split(
-    source_split_dir: Path,
+def copy_yolo_pairs(
+    pairs: list[tuple[Path, Path]],
     destination_split_dir: Path,
     experiment: str,
     split: str,
     source_type: str,
 ) -> list[dict[str, str]]:
-    """Copy one YOLO split while preserving original filenames."""
-    source_images_dir = Path(source_split_dir) / "images"
-    source_labels_dir = Path(source_split_dir) / "labels"
+    """Copy YOLO image-label pairs into one destination split.
+
+    Filename conflicts are resolved with a deterministic ``_dupNNN`` suffix.
+    This protects original train filenames when offline augmented files happen
+    to share a name with an existing image.
+    """
     destination_images_dir = Path(destination_split_dir) / "images"
     destination_labels_dir = Path(destination_split_dir) / "labels"
     destination_images_dir.mkdir(parents=True, exist_ok=True)
     destination_labels_dir.mkdir(parents=True, exist_ok=True)
 
     rows: list[dict[str, str]] = []
-    for image_path, label_path in _find_yolo_pairs(source_images_dir, source_labels_dir):
-        copied_image_path = destination_images_dir / image_path.name
-        copied_label_path = destination_labels_dir / label_path.name
-        shutil.copy2(image_path, copied_image_path)
-        shutil.copy2(label_path, copied_label_path)
-        rows.extend(
-            [
-                _report_row(
-                    experiment=experiment,
-                    split=split,
-                    source_type=source_type,
-                    original_path=str(image_path),
-                    copied_path=str(copied_image_path),
-                    status="copied",
-                    notes="",
-                ),
-                _report_row(
-                    experiment=experiment,
-                    split=split,
-                    source_type=source_type,
-                    original_path=str(label_path),
-                    copied_path=str(copied_label_path),
-                    status="copied",
-                    notes="",
-                ),
-            ]
-        )
-    return rows
-
-
-def copy_augmented_training_data(
-    augmented_pairs: list[tuple[Path, Path]],
-    destination_train_dir: Path,
-    experiment: str,
-) -> list[dict[str, str]]:
-    """Copy offline augmented pairs into an experiment train split."""
-    destination_images_dir = Path(destination_train_dir) / "images"
-    destination_labels_dir = Path(destination_train_dir) / "labels"
-    destination_images_dir.mkdir(parents=True, exist_ok=True)
-    destination_labels_dir.mkdir(parents=True, exist_ok=True)
-
-    rows: list[dict[str, str]] = []
-    for image_path, label_path in augmented_pairs:
+    for image_path, label_path in pairs:
         copied_image_path = destination_images_dir / image_path.name
         copied_label_path = destination_labels_dir / label_path.name
         notes = ""
+
         if copied_image_path.exists() or copied_label_path.exists():
             copied_image_path, copied_label_path = _safe_conflict_paths(
                 destination_images_dir=destination_images_dir,
@@ -262,126 +218,73 @@ def copy_augmented_training_data(
 
         shutil.copy2(image_path, copied_image_path)
         shutil.copy2(label_path, copied_label_path)
-        rows.extend(
-            [
-                _report_row(
-                    experiment=experiment,
-                    split="train",
-                    source_type="offline_augmented",
-                    original_path=str(image_path),
-                    copied_path=str(copied_image_path),
-                    status="copied",
-                    notes=notes,
-                ),
-                _report_row(
-                    experiment=experiment,
-                    split="train",
-                    source_type="offline_augmented",
-                    original_path=str(label_path),
-                    copied_path=str(copied_label_path),
-                    status="copied",
-                    notes=notes,
-                ),
-            ]
-        )
-    return rows
-
-
-def copy_open_source_training_data(
-    open_source_pairs: list[tuple[Path, Path]],
-    destination_train_dir: Path,
-    experiment: str,
-) -> list[dict[str, str]]:
-    """Copy validated open-source pairs into an experiment train split."""
-    destination_images_dir = Path(destination_train_dir) / "images"
-    destination_labels_dir = Path(destination_train_dir) / "labels"
-    destination_images_dir.mkdir(parents=True, exist_ok=True)
-    destination_labels_dir.mkdir(parents=True, exist_ok=True)
-
-    rows: list[dict[str, str]] = []
-    for image_path, label_path in open_source_pairs:
-        copied_image_path = destination_images_dir / image_path.name
-        copied_label_path = destination_labels_dir / label_path.name
-        notes = ""
-        if copied_image_path.exists() or copied_label_path.exists():
-            copied_image_path, copied_label_path = _safe_conflict_paths(
-                destination_images_dir=destination_images_dir,
-                destination_labels_dir=destination_labels_dir,
-                image_name=image_path.name,
+        rows.append(
+            _copy_report_row(
+                experiment=experiment,
+                split=split,
+                source_type=source_type,
+                original_image_path=str(image_path),
+                original_label_path=str(label_path),
+                copied_image_path=str(copied_image_path),
+                copied_label_path=str(copied_label_path),
+                status="copied",
+                notes=notes,
             )
-            notes = "filename_conflict resolved with safe suffix"
-
-        shutil.copy2(image_path, copied_image_path)
-        shutil.copy2(label_path, copied_label_path)
-        rows.extend(
-            [
-                _report_row(
-                    experiment=experiment,
-                    split="train",
-                    source_type="open_source_train",
-                    original_path=str(image_path),
-                    copied_path=str(copied_image_path),
-                    status="copied",
-                    notes=notes,
-                ),
-                _report_row(
-                    experiment=experiment,
-                    split="train",
-                    source_type="open_source_train",
-                    original_path=str(label_path),
-                    copied_path=str(copied_label_path),
-                    status="copied",
-                    notes=notes,
-                ),
-            ]
         )
     return rows
 
 
-def write_dataset_yaml(
-    v2_root: Path,
+def write_yolo_dataset_yaml(
+    yaml_dir: Path,
     experiment_name: str,
+    experiments_dir: Path,
     class_names: dict[int, str],
 ) -> Path:
-    """Write one Ultralytics dataset YAML file relative to ``v2_pipeline``."""
-    v2_root = Path(v2_root)
+    """Write one Ultralytics dataset YAML for an experiment."""
+    yaml_dir = Path(yaml_dir)
+    yaml_dir.mkdir(parents=True, exist_ok=True)
+    v2_root = _infer_v2_root(experiments_dir)
+    experiment_dir = Path(experiments_dir) / experiment_name
+    relative_experiment_dir = experiment_dir.resolve().relative_to(v2_root.resolve())
     payload: dict[str, Any] = {
-        "path": f"data/experiments/{experiment_name}",
+        "path": relative_experiment_dir.as_posix(),
         "train": "train/images",
         "val": "val/images",
         "test": "test/images",
         "nc": len(class_names),
         "names": _normalize_class_names(class_names),
     }
-    yaml_path = v2_root / f"data_{experiment_name}.yaml"
+    yaml_path = yaml_dir / f"data_{experiment_name}.yaml"
     with yaml_path.open("w", encoding="utf-8") as file_handle:
         yaml.safe_dump(payload, file_handle, sort_keys=False)
     return yaml_path
 
 
-def count_yolo_split(
-    split_dir: Path,
-    class_names: dict[int, str],
-) -> dict[str, int]:
-    """Count images, labels, and class objects for one YOLO split."""
+def count_yolo_split(split_dir: Path, class_names: dict[int, str]) -> dict[str, int]:
+    """Count image, label, empty-label, and object totals for one split."""
     split_dir = Path(split_dir)
-    images_dir = split_dir / "images"
-    labels_dir = split_dir / "labels"
+    image_paths = _collect_image_paths(split_dir / "images")
+    label_paths = _collect_label_paths(split_dir / "labels")
     class_counts = {class_id: 0 for class_id in _normalize_class_names(class_names)}
+    num_no_object_images = 0
 
-    label_paths = _collect_label_paths(labels_dir)
     for label_path in label_paths:
-        for class_id in _read_label_class_ids(label_path):
+        class_ids = _read_label_class_ids(label_path)
+        if not class_ids:
+            num_no_object_images += 1
+        for class_id in class_ids:
             if class_id in class_counts:
                 class_counts[class_id] += 1
 
     return {
-        "num_images": len(_collect_image_paths(images_dir)),
+        "num_images": len(image_paths),
         "num_labels": len(label_paths),
+        "num_no_object_images": num_no_object_images,
         "num_objects": sum(class_counts.values()),
         "num_person": class_counts.get(0, 0),
         "num_helmet": class_counts.get(1, 0),
         "num_vest": class_counts.get(2, 0),
+        "num_cleaning_coverall": class_counts.get(3, 0),
     }
 
 
@@ -389,49 +292,20 @@ def summarize_experiments(
     experiments_dir: Path,
     class_names: dict[int, str],
 ) -> pd.DataFrame:
-    """Build the ablation dataset summary table."""
+    """Build a compact summary for every experiment split."""
     rows: list[dict[str, Any]] = []
     for experiment, settings in EXPERIMENTS.items():
         experiment_dir = Path(experiments_dir) / experiment
         for split in SPLITS:
-            counts = count_yolo_split(experiment_dir / split, class_names)
             rows.append(
                 {
                     "experiment": experiment,
                     "split": split,
-                    **counts,
+                    **count_yolo_split(experiment_dir / split, class_names),
                     "notes": settings["notes"] if split == "train" else "fixed split",
                 }
             )
     return pd.DataFrame(rows, columns=SUMMARY_COLUMNS)
-
-
-def build_class_distribution(
-    experiments_dir: Path,
-    class_names: dict[int, str],
-) -> pd.DataFrame:
-    """Count YOLO objects by class for every experiment split."""
-    normalized_class_names = _normalize_class_names(class_names)
-    rows: list[dict[str, Any]] = []
-    for experiment in EXPERIMENTS:
-        for split in SPLITS:
-            labels_dir = Path(experiments_dir) / experiment / split / "labels"
-            class_counts = {class_id: 0 for class_id in normalized_class_names}
-            for label_path in _collect_label_paths(labels_dir):
-                for class_id in _read_label_class_ids(label_path):
-                    if class_id in class_counts:
-                        class_counts[class_id] += 1
-            for class_id, class_name in normalized_class_names.items():
-                rows.append(
-                    {
-                        "experiment": experiment,
-                        "split": split,
-                        "class_id": class_id,
-                        "class_name": class_name,
-                        "object_count": class_counts[class_id],
-                    }
-                )
-    return pd.DataFrame(rows, columns=CLASS_DISTRIBUTION_COLUMNS)
 
 
 def verify_experiment_integrity(
@@ -439,23 +313,23 @@ def verify_experiment_integrity(
     class_names: dict[int, str],
     copy_report: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
-    """Return integrity warnings for generated ablation datasets."""
+    """Return integrity warnings for the generated ablation datasets."""
     normalized_class_names = _normalize_class_names(class_names)
     rows: list[dict[str, str]] = []
     reference_val_signature: str | None = None
     reference_test_signature: str | None = None
 
     if copy_report is not None and not copy_report.empty:
-        conflicts = copy_report[
+        conflict_rows = copy_report[
             copy_report["notes"].fillna("").str.contains("filename_conflict")
         ]
-        for _, row in conflicts.iterrows():
+        for _, row in conflict_rows.iterrows():
             rows.append(
                 _warning_row(
-                    row["experiment"],
-                    row["split"],
-                    "filename_conflict",
-                    f"Resolved conflict for {row['copied_path']}",
+                    experiment=row["experiment"],
+                    split=row["split"],
+                    warning_type="filename_conflict",
+                    details=str(row["copied_image_path"]),
                 )
             )
 
@@ -463,17 +337,13 @@ def verify_experiment_integrity(
         experiment_dir = Path(experiments_dir) / experiment
         for split in SPLITS:
             split_dir = experiment_dir / split
-            images_dir = split_dir / "images"
-            labels_dir = split_dir / "labels"
-            image_paths = _collect_image_paths(images_dir)
-            label_paths = _collect_label_paths(labels_dir)
+            image_paths = _collect_image_paths(split_dir / "images")
+            label_paths = _collect_label_paths(split_dir / "labels")
             image_stems = {path.stem for path in image_paths}
             label_stems = {path.stem for path in label_paths}
 
             if not image_paths and not label_paths:
-                rows.append(
-                    _warning_row(experiment, split, "empty_split", str(split_dir))
-                )
+                rows.append(_warning_row(experiment, split, "empty_split", str(split_dir)))
             if len(image_paths) != len(label_paths):
                 rows.append(
                     _warning_row(
@@ -484,13 +354,9 @@ def verify_experiment_integrity(
                     )
                 )
             for stem in sorted(image_stems - label_stems):
-                rows.append(
-                    _warning_row(experiment, split, "missing_label", stem)
-                )
+                rows.append(_warning_row(experiment, split, "missing_label", stem))
             for stem in sorted(label_stems - image_stems):
-                rows.append(
-                    _warning_row(experiment, split, "missing_image", stem)
-                )
+                rows.append(_warning_row(experiment, split, "missing_image", stem))
 
             class_counts = count_yolo_split(split_dir, normalized_class_names)
             for class_id, class_name in normalized_class_names.items():
@@ -534,73 +400,57 @@ def verify_experiment_integrity(
     return pd.DataFrame(rows, columns=WARNING_COLUMNS)
 
 
-def _validate_original_splits(splits_original_dir: Path) -> None:
+def build_class_distribution(
+    experiments_dir: Path,
+    class_names: dict[int, str],
+) -> pd.DataFrame:
+    """Return object counts by class for callers that need detailed analysis.
+
+    Notebook 05 intentionally does not save this as a separate artifact anymore;
+    the compact summary already contains the class counts needed for a quick
+    ablation dataset sanity check.
+    """
+    rows: list[dict[str, Any]] = []
+    for experiment in EXPERIMENTS:
+        for split in SPLITS:
+            counts = count_yolo_split(Path(experiments_dir) / experiment / split, class_names)
+            for class_id, class_name in _normalize_class_names(class_names).items():
+                rows.append(
+                    {
+                        "experiment": experiment,
+                        "split": split,
+                        "class_id": class_id,
+                        "class_name": class_name,
+                        "object_count": _class_count_from_summary(counts, class_id),
+                    }
+                )
+    return pd.DataFrame(rows)
+
+
+def _validate_original_splits(splits_dir: Path) -> None:
     for split in SPLITS:
-        split_dir = Path(splits_original_dir) / split
-        images_dir = split_dir / "images"
-        labels_dir = split_dir / "labels"
+        images_dir = Path(splits_dir) / split / "images"
+        labels_dir = Path(splits_dir) / split / "labels"
         if not images_dir.exists() or not labels_dir.exists():
-            raise FileNotFoundError(
-                f"Required split folder missing: {split_dir}/images or labels"
-            )
-        pairs = _find_yolo_pairs(images_dir, labels_dir)
-        if not pairs:
-            raise ValueError(f"Required split is empty or mismatched: {split_dir}")
+            raise FileNotFoundError(f"Missing required split folders: {images_dir} / {labels_dir}")
+        if not collect_yolo_pairs(images_dir, labels_dir):
+            raise ValueError(f"Split has no matched YOLO image-label pairs: {images_dir.parent}")
 
 
 def _prepare_experiments_dir(experiments_dir: Path, overwrite: bool) -> None:
-    experiments_dir = Path(experiments_dir)
-    occupied_experiments = [
+    occupied = [
         experiment
         for experiment in EXPERIMENTS
-        if _experiment_has_files(experiments_dir / experiment)
+        if _experiment_has_files(Path(experiments_dir) / experiment)
     ]
-    if occupied_experiments and not overwrite:
+    if occupied and not overwrite:
         raise FileExistsError(
             "Experiment folder(s) already contain files: "
-            f"{', '.join(occupied_experiments)}. "
-            "Set overwrite=True to regenerate experiment datasets."
+            f"{', '.join(occupied)}. Set overwrite=True to regenerate."
         )
     if overwrite:
         for experiment in EXPERIMENTS:
-            _clear_files(experiments_dir / experiment)
-
-
-def _collect_offline_augmented_pairs(
-    augmented_train_dir: Path,
-) -> list[tuple[Path, Path]]:
-    pairs: list[tuple[Path, Path]] = []
-    for source_name in OFFLINE_AUGMENTATION_SOURCES:
-        source_dir = Path(augmented_train_dir) / source_name
-        images_dir = source_dir / "images"
-        labels_dir = source_dir / "labels"
-        if not images_dir.exists() or not labels_dir.exists():
-            continue
-        pairs.extend(_find_yolo_pairs(images_dir, labels_dir))
-    return sorted(pairs, key=lambda item: (item[0].parent.parent.name, item[0].name))
-
-
-def _collect_open_source_train_pairs(
-    open_source_train_dir: Path | None,
-) -> list[tuple[Path, Path]]:
-    if open_source_train_dir is None:
-        return []
-    images_dir = Path(open_source_train_dir) / "images"
-    labels_dir = Path(open_source_train_dir) / "labels"
-    if not images_dir.exists() or not labels_dir.exists():
-        return []
-    return _find_yolo_pairs(images_dir, labels_dir)
-
-
-def _find_yolo_pairs(images_dir: Path, labels_dir: Path) -> list[tuple[Path, Path]]:
-    image_paths = _collect_image_paths(images_dir)
-    label_paths = {path.stem: path for path in _collect_label_paths(labels_dir)}
-    pairs: list[tuple[Path, Path]] = []
-    for image_path in image_paths:
-        label_path = label_paths.get(image_path.stem)
-        if label_path is not None:
-            pairs.append((image_path, label_path))
-    return pairs
+            _clear_files(Path(experiments_dir) / experiment)
 
 
 def _collect_image_paths(images_dir: Path) -> list[Path]:
@@ -609,7 +459,9 @@ def _collect_image_paths(images_dir: Path) -> list[Path]:
     return [
         path
         for path in sorted(Path(images_dir).iterdir())
-        if path.is_file() and path.suffix.lower() in VALID_IMAGE_EXTENSIONS
+        if path.is_file()
+        and not path.name.startswith(".")
+        and path.suffix.lower() in VALID_IMAGE_EXTENSIONS
     ]
 
 
@@ -619,7 +471,7 @@ def _collect_label_paths(labels_dir: Path) -> list[Path]:
     return [
         path
         for path in sorted(Path(labels_dir).iterdir())
-        if path.is_file() and path.suffix.lower() == ".txt"
+        if path.is_file() and not path.name.startswith(".") and path.suffix.lower() == ".txt"
     ]
 
 
@@ -629,20 +481,23 @@ def _read_label_class_ids(label_path: Path) -> list[int]:
         lines = Path(label_path).read_text(encoding="utf-8").splitlines()
     except OSError:
         return class_ids
+
     for line in lines:
         values = line.split()
         if not values:
             continue
         try:
+            # YOLO class IDs are integers, but float conversion tolerates labels
+            # that were accidentally serialized as "3.0".
             class_ids.append(int(float(values[0])))
         except ValueError:
             continue
     return class_ids
 
 
-def _ensure_yolo_split_dirs(experiment_dir: Path, split: str) -> None:
-    (Path(experiment_dir) / split / "images").mkdir(parents=True, exist_ok=True)
-    (Path(experiment_dir) / split / "labels").mkdir(parents=True, exist_ok=True)
+def _ensure_yolo_split_dirs(split_dir: Path) -> None:
+    (Path(split_dir) / "images").mkdir(parents=True, exist_ok=True)
+    (Path(split_dir) / "labels").mkdir(parents=True, exist_ok=True)
 
 
 def _safe_conflict_paths(
@@ -651,11 +506,9 @@ def _safe_conflict_paths(
     image_name: str,
 ) -> tuple[Path, Path]:
     image_path = Path(image_name)
-    image_stem = image_path.stem
-    image_suffix = image_path.suffix
-    for suffix_index in range(2, 10_000):
-        candidate_stem = f"{image_stem}_{suffix_index}"
-        candidate_image = destination_images_dir / f"{candidate_stem}{image_suffix}"
+    for suffix_index in range(1, 10_000):
+        candidate_stem = f"{image_path.stem}_dup{suffix_index:03d}"
+        candidate_image = destination_images_dir / f"{candidate_stem}{image_path.suffix}"
         candidate_label = destination_labels_dir / f"{candidate_stem}.txt"
         if not candidate_image.exists() and not candidate_label.exists():
             return candidate_image, candidate_label
@@ -663,9 +516,9 @@ def _safe_conflict_paths(
 
 
 def _experiment_has_files(experiment_dir: Path) -> bool:
-    if not Path(experiment_dir).exists():
-        return False
-    return any(path.is_file() for path in Path(experiment_dir).rglob("*"))
+    return Path(experiment_dir).exists() and any(
+        path.is_file() for path in Path(experiment_dir).rglob("*")
+    )
 
 
 def _clear_files(experiment_dir: Path) -> None:
@@ -678,12 +531,12 @@ def _clear_files(experiment_dir: Path) -> None:
 
 def _split_signature(split_dir: Path) -> str:
     digest = hashlib.sha256()
-    for child_name in ("images", "labels"):
-        child_dir = Path(split_dir) / child_name
-        for path in sorted(child_dir.iterdir()) if child_dir.exists() else []:
+    for folder_name in ("images", "labels"):
+        folder = Path(split_dir) / folder_name
+        for path in sorted(folder.iterdir()) if folder.exists() else []:
             if not path.is_file():
                 continue
-            digest.update(child_name.encode("utf-8"))
+            digest.update(folder_name.encode("utf-8"))
             digest.update(path.name.encode("utf-8"))
             digest.update(_file_hash(path).encode("utf-8"))
     return digest.hexdigest()
@@ -697,14 +550,12 @@ def _file_hash(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _infer_v2_root(experiments_dir: Path) -> Path:
-    experiments_dir = Path(experiments_dir).resolve()
-    if experiments_dir.name == "experiments" and experiments_dir.parent.name == "data":
-        return experiments_dir.parent.parent
-    for candidate in (experiments_dir, *experiments_dir.parents):
+def _infer_v2_root(path: Path) -> Path:
+    resolved = Path(path).resolve()
+    for candidate in (resolved, *resolved.parents):
         if candidate.name == "v2_pipeline":
             return candidate
-    raise RuntimeError(f"Could not infer v2_pipeline root from {experiments_dir}")
+    raise RuntimeError(f"Could not infer v2_pipeline root from {path}")
 
 
 def _normalize_class_names(class_names: dict[int, str]) -> dict[int, str]:
@@ -712,30 +563,34 @@ def _normalize_class_names(class_names: dict[int, str]) -> dict[int, str]:
 
 
 def _class_count_from_summary(counts: dict[str, int], class_id: int) -> int:
-    if class_id == 0:
-        return counts.get("num_person", 0)
-    if class_id == 1:
-        return counts.get("num_helmet", 0)
-    if class_id == 2:
-        return counts.get("num_vest", 0)
-    return 0
+    column_by_class = {
+        0: "num_person",
+        1: "num_helmet",
+        2: "num_vest",
+        3: "num_cleaning_coverall",
+    }
+    return counts.get(column_by_class.get(class_id, ""), 0)
 
 
-def _report_row(
+def _copy_report_row(
     experiment: str,
     split: str,
     source_type: str,
-    original_path: str,
-    copied_path: str,
     status: str,
     notes: str,
+    original_image_path: str = "",
+    original_label_path: str = "",
+    copied_image_path: str = "",
+    copied_label_path: str = "",
 ) -> dict[str, str]:
     return {
         "experiment": experiment,
         "split": split,
         "source_type": source_type,
-        "original_path": original_path,
-        "copied_path": copied_path,
+        "original_image_path": original_image_path,
+        "original_label_path": original_label_path,
+        "copied_image_path": copied_image_path,
+        "copied_label_path": copied_label_path,
         "status": status,
         "notes": notes,
     }
