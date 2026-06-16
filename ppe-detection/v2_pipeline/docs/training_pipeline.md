@@ -4,9 +4,9 @@ The training workflow is designed to keep experiments comparable and to protect 
 
 ## Sequence
 
-1. Validate and merge raw teammate inputs.
-2. Run EDA on the merged dataset.
-3. Split into train, val, and test.
+1. Validate the source-lane input folders.
+2. Run EDA on the input source distribution.
+3. Split into train, val, and test from `open_source`, `factory_source`, and `test_source`.
 4. Generate offline augmentation from the training split only.
 5. Build ablation dataset variants.
 6. Train candidate YOLO architectures with shared settings.
@@ -26,21 +26,39 @@ Candidate architectures are compared using the priority order in `configs/traini
 5. model_size
 
 Notebook 06 performs architecture triage before the ablation study. Every
-candidate model is trained on the same `exp_D_full_pipeline` dataset YAML with
-the same training and online augmentation settings. This makes the comparison
-about model architecture rather than dataset composition.
+candidate model is trained on the same four-class
+`data_exp_D_full_pipeline.yaml` dataset YAML with the same training and online
+augmentation settings. The YAML must declare:
+
+```text
+0 = person
+1 = helmet
+2 = vest
+3 = cleaning_coverall
+```
+
+This makes the comparison about model architecture rather than dataset
+composition.
 
 Candidate selection uses validation metrics only. The untouched test split is
 not used for choosing the architecture, tuning augmentation settings, or ranking
 candidate runs. After the best lightweight architecture is selected, Notebook 07
 can run the ablation study on that locked architecture.
 
-Candidate runs are saved under `runs/candidate_models/`, and summary reports are
-saved under `reports/training/`.
+Candidate runs are saved under `runs/candidate_models/`, and compact CSV
+reports are saved under `reports/training/`:
 
-On Windows/Jupyter, keep `workers: 0` unless training has been verified from a
-terminal process. PyTorch dataloader workers can survive a kernel crash as
-orphan `--multiprocessing-fork` processes. The training helpers also set
+- `candidate_model_results.csv`
+- `candidate_model_failures.csv`
+- `candidate_model_ranking.csv`
+
+Notebook 06 keeps Ultralytics plot generation off during candidate triage to
+avoid creating many per-candidate PNG artifacts. The CSV ranking is the source
+of truth for architecture selection.
+
+On Windows/Jupyter, tune `batch`, `workers`, and `amp` conservatively. PyTorch
+dataloader workers can survive a kernel crash as orphan
+`--multiprocessing-fork` processes if the kernel dies. The training helpers set
 OpenMP environment variables before loading Ultralytics to avoid the duplicate
 `libomp.dll` / `libiomp5md.dll` runtime crash.
 
