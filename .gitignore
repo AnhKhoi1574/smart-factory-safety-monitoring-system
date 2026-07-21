@@ -20,6 +20,8 @@ conda-meta/
 
 # Local PPE datasets
 ppe-detection/v1_legacy/data/**
+ppe-detection/**/data/input/**
+ppe-detection/**/data/generated/**
 ppe-detection/**/data/raw_sources/**
 ppe-detection/**/data/test_sources/**
 ppe-detection/**/data/open_source/**
@@ -34,6 +36,11 @@ ppe-detection/**/data/experiments/**
 !ppe-detection/**/data/open_source_train/
 !ppe-detection/**/data/open_source_train/images/
 !ppe-detection/**/data/open_source_train/labels/
+
+# Keep the new PPE v2 input skeleton visible while ignoring pasted data
+!ppe-detection/**/data/input/
+!ppe-detection/**/data/input/**/
+!ppe-detection/**/data/input/**/.gitkeep
 
 # Keep folder placeholders
 !**/.gitkeep

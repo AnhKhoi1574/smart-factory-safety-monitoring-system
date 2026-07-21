@@ -11,30 +11,33 @@ The ablation study should answer one question at a time and should only begin af
 
 ## Final Test-Set Rule
 
-The test split is reserved for the final chosen configuration only. By default, it comes from `data/test_sources/` and is copied into `data/splits_original/test/` during validation and merge. Do not also reserve 10% of the merged dataset for testing when `use_external_test_set: true`; split the merged dataset in `data/master_original/` into train/validation only. During candidate comparison and ablation work, rely on training/validation metrics and keep the test set untouched.
+The test split is reserved for the final chosen configuration only. In the
+current v2 source-lane workflow, it comes from `data/input/test_source/` and is
+copied into `data/generated/splits/test/` by Notebook 03. During candidate
+comparison and ablation work, rely on training/validation metrics and keep the
+test split untouched.
 
 ## Notebook 05 Experiment Datasets
 
-Notebook 05 creates four YOLO-ready dataset folders under `data/experiments/`
-so later training and ablation notebooks can compare one factor at a time:
+Notebook 05 creates four YOLO-ready dataset folders under
+`data/generated/experiments/` so later training and ablation notebooks can
+compare one factor at a time:
 
 - `exp_A_original_only`: original train split only; online augmentation is off
-  during training. Optional open-source samples are included in train only.
+  during training.
 - `exp_B_online_aug`: original train split only; online augmentation is on
-  during training. Optional open-source samples are included in train only.
+  during training.
 - `exp_C_offline_aug`: original train split plus offline augmented train
-  samples; online augmentation is off or minimal during training. Optional
-  open-source samples are included in train only.
+  samples; online augmentation is off or minimal during training.
 - `exp_D_full_pipeline`: original train split plus offline augmented train
-  samples; online augmentation is on during training. Optional open-source
-  samples are included in train only.
+  samples; online augmentation is on during training.
 
 The validation and test splits are copied identically into every experiment.
-Only the training split changes. If `data/open_source_train/` exists, those
-validated open-source samples are copied equally into every experiment train
-split and never into validation or test. This keeps validation metrics
-comparable during Notebook 07 and preserves the final test set for one-time
-evaluation of the selected configuration.
+Only the training split changes. Open-source samples are already included in
+`data/generated/splits/train/` by Notebook 03, so Notebook 05 does not read a
+separate open-source folder again. This keeps validation metrics comparable and
+preserves the final test set for one-time evaluation of the selected
+configuration.
 
 Notebook 05 also writes one Ultralytics dataset YAML file per experiment:
 
@@ -43,8 +46,15 @@ Notebook 05 also writes one Ultralytics dataset YAML file per experiment:
 - `data_exp_C_offline_aug.yaml`
 - `data_exp_D_full_pipeline.yaml`
 
-Reports under `reports/experiments/` document copied files, split summaries,
-class distributions, and integrity warnings.
+Reports under `reports/experiments/` are intentionally compact:
+
+- `ablation_dataset_report.csv`
+- `ablation_dataset_summary.csv`
+- `ablation_integrity_warnings.csv`
+
+The summary includes all four PPE classes, including
+`num_cleaning_coverall`, so class `3` is visible before training without
+creating extra class-distribution artifacts.
 
 ## Notebook 07 Ablation Study
 

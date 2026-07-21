@@ -1,9 +1,10 @@
-path: data/experiments/exp_C_offline_aug
+path: data/generated/experiments/exp_C_offline_aug
 train: train/images
 val: val/images
 test: test/images
-nc: 3
+nc: 4
 names:
   0: person
   1: helmet
   2: vest
+  3: cleaning_coverall

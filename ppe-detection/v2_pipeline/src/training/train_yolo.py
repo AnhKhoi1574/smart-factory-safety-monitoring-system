@@ -44,6 +44,11 @@ def train_candidate_models(
 ) -> pd.DataFrame:
     """Train YOLO candidate models with shared settings.
 
+    The class taxonomy is not hardcoded here. Ultralytics reads the four-class
+    mapping, including ``3 = cleaning_coverall``, from the supplied dataset
+    YAML. That keeps candidate triage focused on architecture rather than
+    dataset construction.
+
     Args:
         data_yaml: Ultralytics dataset YAML. Notebook 06 uses
             ``data_exp_D_full_pipeline.yaml`` for architecture triage.
@@ -90,6 +95,8 @@ def train_candidate_models(
                     }
                 )
             else:
+                # Each candidate gets the same dataset and train arguments so
+                # architecture capacity is the only intended comparison factor.
                 train_result = _train_one_candidate(
                     model_name=model_name,
                     data_yaml=resolved_data_yaml,
@@ -108,6 +115,8 @@ def train_candidate_models(
                     }
                 )
         except Exception as exc:
+            # Unsupported checkpoints or missing weights should not kill the
+            # whole triage run. Record the failure and continue when requested.
             row.update({"status": "failed", "error_message": str(exc)})
             if not continue_on_error:
                 rows.append(row)
@@ -350,6 +359,7 @@ def _train_one_candidate(
     run_name: str,
     train_args: dict[str, Any],
 ) -> Any:
+    """Run one Ultralytics training call with notebook-safe custom keys removed."""
     from ultralytics import YOLO
 
     custom_keys = {"dry_run", "overwrite", "selected_experiment"}

@@ -1,44 +1,69 @@
 # Augmentation Strategy
 
-The v2 pipeline separates augmentation into two layers:
+The v2 PPE pipeline uses two augmentation layers:
 
-- online augmentation inside YOLO training,
-- offline augmentation generated as additional training samples.
+- offline augmentation generated as additional training samples,
+- online augmentation inside Ultralytics training.
 
 ## Split-Before-Augmentation Rule
 
-The merged dataset must be split into train, val, and test before any augmentation happens. This prevents augmented siblings of an image from leaking across evaluation boundaries.
+Always split original data before augmentation:
 
-## Offline Augmentation Targets
+```text
+validate input sources
+-> create data/generated/splits
+-> augment training split only
+-> build experiments
+-> train
+```
 
-Offline augmentation is created only from training images:
-
-- infrared-like variants,
-- harsh sunlight variants,
-- blur/compression variants.
-
-These are stored under `data/augmented_train/` and later assembled into the experiment folders.
+Validation and test images must stay original and untouched.
 
 ## Notebook 04 Offline Augmentation
 
-Notebook 04 reads only from `data/splits_original/train/images` and
-`data/splits_original/train/labels`. It does not read from, write to, or
-regenerate validation or test samples. This keeps evaluation data original and
-prevents augmented siblings from leaking into model selection or final testing.
+Notebook `04_offline_augmentation.ipynb` reads only:
 
-The offline augmentations are intentionally mild:
+```text
+data/generated/splits/train/images/
+data/generated/splits/train/labels/
+```
 
-- IR/night simulation converts RGB images toward monochrome low-light CCTV,
-  adds light sensor noise, and adjusts contrast for night/IR robustness.
-- Harsh sunlight simulation moderately increases brightness and contrast, then
-  adds localized glare or overexposed regions to improve robustness to outdoor
-  factory lighting and reflections.
-- Blur/compression simulation applies mild motion or Gaussian blur plus JPEG
-  artifacts to mimic CCTV video compression, motion smear, and low-bandwidth
-  image quality.
+It writes all offline augmented samples into one generated train-only pool:
 
-YOLO label files are copied unchanged because these transforms do not move,
-crop, resize, flip, or warp objects. Augmented image and label filenames use
-matching prefixes such as `ir_`, `sun_`, and `blur_`.
+```text
+data/generated/augmented/images/
+data/generated/augmented/labels/
+```
 
-Validation and test sets remain untouched throughout this step.
+Current offline transforms:
+
+- IR / grayscale CCTV simulation
+- harsh sunlight / glare simulation
+- blur / JPEG compression simulation
+
+These transforms are intentionally mild and do not move objects. Because object
+geometry is unchanged, labels are copied unchanged. This preserves all four
+classes:
+
+```text
+0 = person
+1 = helmet
+2 = vest
+3 = cleaning_coverall
+```
+
+If geometric augmentation is added later, bounding boxes must be updated instead
+of copied unchanged.
+
+## Report Policy
+
+Notebook 04 keeps artifacts small. It saves only:
+
+```text
+reports/augmentation/offline_augmentation_report.csv
+reports/augmentation/offline_augmentation_summary.csv
+```
+
+It does not save separate CSVs for each augmentation type or default example
+figures. Visual checks can be added later if a specific augmentation setting
+needs review.

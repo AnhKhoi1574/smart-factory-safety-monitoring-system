@@ -340,7 +340,13 @@ def benchmark_model_latency(
 
 
 def rank_candidate_results(results_df: pd.DataFrame) -> pd.DataFrame:
-    """Rank candidates by validation recall, mAP, FPS, then model size."""
+    """Rank candidates by validation recall, mAP, FPS, then model size.
+
+    Candidate selection is validation-only. The untouched test split should not
+    be used until final evaluation, so this helper only consumes the metrics
+    recorded during training/validation and optional validation-image latency
+    benchmarking.
+    """
     if results_df.empty:
         return results_df.copy()
 
@@ -360,11 +366,13 @@ def rank_candidate_results(results_df: pd.DataFrame) -> pd.DataFrame:
         - ranked["model_size_mb"].fillna(1_000_000) / 1_000_000
     )
     ranked.loc[~successful, "rank_score"] = -1
-    return ranked.sort_values(
+    ranked = ranked.sort_values(
         by=["rank_score", "recall", "map50", "map50_95", "fps", "model_size_mb"],
         ascending=[False, False, False, False, False, True],
         kind="stable",
     ).reset_index(drop=True)
+    ranked["rank"] = range(1, len(ranked) + 1)
+    return ranked
 
 
 def rank_ablation_results(results_df: pd.DataFrame) -> pd.DataFrame:

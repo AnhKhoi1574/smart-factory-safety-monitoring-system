@@ -1,111 +1,112 @@
 # Dataset Preparation
 
-The v2 intake contract expects each teammate to deliver a folder with:
+The PPE v2 pipeline now uses direct input source lanes instead of a merged
+`master_original` folder.
 
-- `images/`
-- `labels/`
+## Input Layout
 
-Each image must have a matching YOLO `.txt` file with normalized coordinates and class IDs in the three-class PPE schema.
-
-## Validation and Merge Flow
-
-1. Drop teammate folders into `data/raw_sources/` locally.
-2. Run `01_validate_and_merge_dataset.ipynb`.
-3. Validate folder shape, image-label pairing, class IDs, and YOLO row format.
-4. Merge only valid samples into the merged dataset folder, `data/master_original/`.
-5. Record findings under `reports/validation/`.
-
-The merge stage should use deterministic renaming so samples from different teammates can coexist without collisions.
-
-Merged original samples are renamed with one global sequence across all sources:
-
-- `ppe_00001.jpg`
-- `ppe_00001.txt`
-- `ppe_00002.jpg`
-- `ppe_00002.txt`
-
-If you have a separate held-out test set, place it under `data/test_sources/` with the same `images/` and `labels/` structure. Notebook `01_validate_and_merge_dataset.ipynb` validates it separately and copies valid rows into `data/splits_original/test/` with names such as:
-
-- `test_00001.jpg`
-- `test_00001.txt`
-
-The default config uses this external-test workflow:
-
-- `use_external_test_set: true`
-- `split.train: 0.80`
-- `split.val: 0.20`
-- `split.test: 0.00`
-
-With that setting, notebook `03_split_dataset.ipynb` should split the merged dataset in `data/master_original/` into train and validation only. It must not reserve another 10% test split from the merged dataset, because the final test set already comes from `data/test_sources/`.
-
-## Optional Open-Source Train-Only Data
-
-Open-source PPE datasets can be added when they already use the same YOLO class
-schema:
-
-- `0 = person`
-- `1 = helmet`
-- `2 = vest`
-
-Place each open-source dataset under:
+Place local YOLO data under:
 
 ```text
-data/open_source/dataset_name/
+data/input/open_source/
+  images/
+  labels/
+
+data/input/factory_source/
+  images/
+  labels/
+
+data/input/test_source/
   images/
   labels/
 ```
 
-Notebook `01_validate_and_merge_dataset.ipynb` validates these folders with the
-same image, pairing, class ID, and YOLO geometry checks used for teammate data.
-Valid rows are copied into the train-only pool:
+Source meaning:
+
+- `open_source`: public or external data used for training only.
+- `factory_source`: target-domain CCTV data used for training and validation.
+- `test_source`: final untouched test data used only for final evaluation.
+
+Each image should have a matching `.txt` label file with the same base name.
+
+## Class Map
+
+Use the fixed four-class YOLO schema:
 
 ```text
-data/open_source_train/images/
-data/open_source_train/labels/
+0 = person
+1 = helmet
+2 = vest
+3 = cleaning_coverall
 ```
 
-with deterministic names such as:
+Do not add violation classes. Role and violation logic is handled after
+detection by the backend.
 
-- `open_00001.jpg`
-- `open_00001.txt`
+## Notebook 01
 
-Open-source samples are not copied into `data/master_original/`,
-`data/splits_original/val/`, or `data/splits_original/test/`. Notebook 05 adds
-them equally to the training split of every ablation experiment, which provides
-extra person/PPE perspective while keeping validation and test factory-specific.
+`01_validate_and_merge_dataset.ipynb` now validates the three input source lanes
+only. It does not merge, split, augment, train, or modify input files.
 
-Notebook 04 does not generate offline augmentation from open-source samples;
-offline IR, sunlight, and blur/compression augmentation remains focused on the
-factory training split.
+Validation checks include:
 
-## Validation Report and Merge Outputs
+- readable image
+- supported image extension
+- matching image-label pair
+- valid class ID
+- five YOLO values per non-empty label row
+- numeric normalized coordinates
+- positive box width and height
+- box boundaries inside the image
+- duplicate base-name and duplicate-content warnings
 
-Notebook `01_validate_and_merge_dataset.ipynb` produces CSV files under `reports/validation/`:
+Reports are written under `reports/validation/`:
 
-- `validation_report.csv`: one row per discovered sample or unmatched file, including status, errors, warnings, image dimensions, and class counts.
-- `invalid_samples.csv`: rows from the validation report where `status != "valid"`.
-- `dataset_summary.csv`: total valid, invalid, warning, duplicate-name, and object-count summaries.
-- `merge_report.csv`: the original and renamed file paths for copied valid training/validation candidate samples.
-- `test_validation_report.csv`: validation results for optional separate test sources.
-- `test_invalid_samples.csv`: invalid rows from optional separate test sources.
-- `test_merge_report.csv`: copied valid separate test rows and their `test_00001`-style filenames.
-- `open_source_validation_report.csv`: validation results for optional
-  open-source sources.
-- `open_source_invalid_samples.csv`: invalid rows from optional open-source
-  sources.
-- `open_source_merge_report.csv`: copied valid open-source train-only rows and
-  their `open_00001`-style filenames.
+- `validation_report.csv`
+- `source_summary.csv`
 
-Cross-source duplicate base names are warnings because merged filenames use a global sequence. Empty labels, unreadable images, invalid YOLO rows, missing pairs, and duplicate image base names inside one source remain invalid.
+Invalid rows and warnings are displayed in the notebook by filtering
+`validation_report.csv`; no separate invalid-samples report is needed.
 
-This step only validates and merges original samples. Train/validation/test splitting and augmentation happen in later notebooks.
+## Split Policy
 
-## Notebook 02 Dataset EDA
+The later split notebook should use:
 
-Notebook `02_dataset_eda.ipynb` analyzes the cleaned merged dataset under `data/master_original/` and, when present, the separate held-out test set under `data/splits_original/test/`.
+- `train`: valid `open_source` samples plus the training portion of
+  `factory_source`.
+- `val`: validation portion of `factory_source` only.
+- `test`: valid `test_source` only.
 
-This step does not modify images, labels, raw sources, test data, or split data. It only writes ignored CSV and PNG reports under `reports/eda/`.
+This keeps validation and test focused on the real factory domain while still
+using open-source data to improve training coverage.
 
-The EDA checks class balance, image resolutions, object density, bounding box sizes, small-object patterns, and annotation review warnings such as people without helmet or vest boxes. These warnings are prompts for human review, not validation failures.
+Notebook `03_split_dataset.ipynb` creates this generated split under:
 
-Use the EDA outputs to decide whether the cleaned originals are ready for Notebook `03_split_dataset.ipynb`. Splitting still happens after EDA, and augmentation still happens only after splitting.
+```text
+data/generated/splits/train/
+data/generated/splits/val/
+data/generated/splits/test/
+```
+
+The factory train/validation split is stratified by whether images contain:
+
+- `helmet`
+- `vest`
+- `cleaning_coverall`
+
+If a class or class-combination appears in too few factory images to be present
+in both train and validation, Notebook 03 records a warning rather than hiding
+the imbalance.
+
+## Generated Data
+
+Generated data belongs under:
+
+```text
+data/generated/splits/
+data/generated/augmented/
+data/generated/experiments/
+```
+
+Do not recreate `data/master_original/`, `data/raw_sources/`, or old
+train-only `data/open_source_train/` outputs for the new pipeline.
