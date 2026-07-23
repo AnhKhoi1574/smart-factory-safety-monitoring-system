@@ -25,6 +25,7 @@ cleaning coverall.
 - `ppe-detection/`: PPE detection module with legacy work and the active v2
   pipeline.
 - `sign-detection/`: factory safety sign detection pipeline.
+- `behavioral-detection/`: behavioral data & preprocessing pipeline.
 
 ## PPE v2 Data Contract
 
@@ -88,3 +89,4 @@ placeholders only.
 - PPE legacy area: [ppe-detection/v1_legacy/README.md](ppe-detection/v1_legacy/README.md)
 - PPE v2 pipeline: [ppe-detection/v2_pipeline/README.md](ppe-detection/v2_pipeline/README.md)
 - Sign detection module: [sign-detection/README.md](sign-detection/README.md)
+- Behavioral detection module: [behavioral-detection/README.md](behavioral-detection/README.md)
